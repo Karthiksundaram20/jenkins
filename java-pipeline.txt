@@ -1,0 +1,78 @@
+pipeline{
+    
+    agent any
+    
+    tools{
+        maven "MAVEN_SOFTWARE"
+    }
+    
+    environment{
+        image_name = "pycloud5858/java-project"
+        tag = """${BUILD_NUMBER}"""
+    }
+    
+    stages{
+        stage("Github checkout"){
+            steps{
+                git credentialsId: 'Github-Credentials', url: 'https://github.com/pyCloud411/java-project.git'
+            }
+        }
+        
+        stage("Maven Build"){
+            steps{
+                sh "mvn clean install"
+            }
+        }
+        
+        stage("Docker Image Build"){
+            steps{
+                sh "docker build -t  ${image_name}:${tag} ."
+            }
+        }
+        
+        stage("Push docker image into hub"){
+            steps{
+                withDockerRegistry(credentialsId: 'Docker-Hub', url: 'https://index.docker.io/v1/') {
+   sh "docker push ${image_name}:${tag}"
+}
+            }
+        }
+        
+        stage("Creating Deploy File"){
+            steps{
+                fileOperations([fileCreateOperation(fileContent: """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-deployment
+  labels:
+    app: java
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java
+  template:
+    metadata:
+      labels:
+        app: java
+    spec:
+      containers:
+      - name: java
+        image: ${image_name}:${tag}
+        ports:
+        - containerPort: 8081
+""", fileName: '/var/lib/jenkins/workspace/java-project-pipeline/deploy.yml')])
+            }
+        }
+        
+        stage("Deployment"){
+            steps{
+                 script {
+            kubernetesDeploy(configs: "deploy.yml", kubeconfigId: "dev-k8s-cluster")
+        }
+            }
+
+            }
+        
+    }
+}
